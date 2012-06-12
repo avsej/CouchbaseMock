@@ -172,6 +172,7 @@ public class MemcachedServer implements Runnable, BinaryProtocolHandler {
         ports.put("direct", port);
         ports.put("proxy", 0); //todo this should be fixed (Vitaly.R)
         map.put("ports", ports);
+        map.put("couchApiBase", "http://" + hostname + ":" + bucket);
         return JSONObject.fromObject(map).toString();
     }
 

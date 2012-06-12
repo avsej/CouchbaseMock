@@ -46,6 +46,7 @@ import org.couchbase.mock.control.FailoverCommandHandler;
 import org.couchbase.mock.control.RespawnCommandHandler;
 import org.couchbase.mock.control.HiccupCommandHandler;
 import org.couchbase.mock.control.TruncateCommandHandler;
+import org.couchbase.mock.http.ViewsHandler;
 
 /**
  * This is a super-scaled down version of something that might look like
@@ -60,7 +61,9 @@ public class CouchbaseMock {
     private final Map<String, Bucket> buckets;
     private final String poolName = "default";
     private int port = 8091;
+    private int viewsPort = port + 1;
     private HttpServer httpServer;
+    private HttpServer viewsServer;
     private Authenticator authenticator;
     private ArrayList<Thread> nodeThreads;
     private final CountDownLatch startupLatch;
@@ -92,6 +95,10 @@ public class CouchbaseMock {
         return monitor;
     }
 
+    public HttpServer getViewsServer() {
+        return viewsServer;
+    }
+
     public static class HarakiriMonitor extends Observable implements Runnable {
 
         private final boolean terminate;
@@ -100,8 +107,7 @@ public class CouchbaseMock {
         private OutputStream output;
         private Socket sock;
         private Thread thread;
-        private final Map<String,MockControlCommandHandler> commandHandlers;
-
+        private final Map<String, MockControlCommandHandler> commandHandlers;
 
         public HarakiriMonitor(String host, int port, boolean terminate, CouchbaseMock mock) throws IOException {
             this.mock = mock;
@@ -118,14 +124,12 @@ public class CouchbaseMock {
 
         }
 
-        public void start()
-        {
+        public void start() {
             thread = new Thread(this, "HarakiriMonitor");
             thread.start();
         }
 
-        public void stop()
-        {
+        public void stop() {
             thread.interrupt();
         }
 
@@ -143,8 +147,7 @@ public class CouchbaseMock {
 
             try {
                 handler.execute(mock, tokens);
-            }
-            catch (NumberFormatException ex) {
+            } catch (NumberFormatException ex) {
                 System.err.printf("Got exception: %s\n", ex.toString());
                 return;
             }
@@ -221,6 +224,7 @@ public class CouchbaseMock {
     public CouchbaseMock(String hostname, int port, int numNodes, int bucketStartPort, int numVBuckets) throws IOException {
         this(hostname, port, numNodes, bucketStartPort, numVBuckets, null);
     }
+
     public CouchbaseMock(String hostname, int port, int numNodes, int numVBuckets) throws IOException {
         this(hostname, port, numNodes, 0, numVBuckets, null);
     }
@@ -353,6 +357,25 @@ public class CouchbaseMock {
         }
     }
 
+    private HttpServer createHttpServer(int port) throws IOException {
+        boolean busy = true;
+        HttpServer http = null;
+        do {
+            if (port == 0) {
+                ServerSocket server = new ServerSocket(0);
+                port = server.getLocalPort();
+                server.close();
+            }
+            try {
+                http = HttpServer.create(new InetSocketAddress(port), 10);
+            } catch (BindException ex) {
+                System.err.println("Looks like port " + port + " busy, lets try another one");
+            }
+            busy = false;
+        } while (busy);
+        return http;
+    }
+
     /*
      * Start cluster in background
      */
@@ -364,23 +387,19 @@ public class CouchbaseMock {
         }
 
         try {
-            boolean busy = true;
-            do {
-                if (port == 0) {
-                    ServerSocket server = new ServerSocket(0);
-                    port = server.getLocalPort();
-                    server.close();
-                }
-                try {
-                    httpServer = HttpServer.create(new InetSocketAddress(port), 10);
-                } catch (BindException ex) {
-                    System.err.println("Looks like port " + port + " busy, lets try another one");
-                }
-                busy = false;
-            } while (busy);
+            httpServer = createHttpServer(port);
             httpServer.createContext("/pools", new PoolsHandler(this)).setAuthenticator(authenticator);
             httpServer.setExecutor(Executors.newCachedThreadPool());
             httpServer.start();
+            port = httpServer.getAddress().getPort();
+            System.out.println(port);
+
+            viewsServer = createHttpServer(port + 1);
+            viewsServer.createContext("/", new ViewsHandler(this));
+            viewsServer.setExecutor(Executors.newCachedThreadPool());
+            viewsServer.start();
+            viewsPort = viewsServer.getAddress().getPort();
+            System.out.println(viewsPort);
             startupLatch.countDown();
         } catch (IOException ex) {
             Logger.getLogger(CouchbaseMock.class.getName()).log(Level.SEVERE, null, ex);

@@ -64,9 +64,10 @@ public class ViewsHandler implements HttpHandler {
             }
             if (exchange.getRequestMethod().equals("GET")) {
             } else if (exchange.getRequestMethod().equals("PUT")) {
-                if (tokenizer.countTokens() < 2) {
+                if (tokenizer.countTokens() != 2) {
                     throw new HTTPException(HttpURLConnection.HTTP_BAD_REQUEST, "Only reserved document ids may start with underscore");
                 }
+                String designDocId = tokenizer.nextToken() + tokenizer.nextToken();
             } else if (exchange.getRequestMethod().equals("DELETE")) {
             } else {
                 throw new HTTPException(HttpURLConnection.HTTP_BAD_METHOD, "Only GET,PUT,DELETE allowed");
